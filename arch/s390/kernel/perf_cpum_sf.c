@@ -1,12 +1,9 @@
+// SPDX-License-Identifier: GPL-2.0
 /*
  * Performance event support for the System z CPU-measurement Sampling Facility
  *
- * Copyright IBM Corp. 2013
+ * Copyright IBM Corp. 2013, 2018
  * Author(s): Hendrik Brueckner <brueckner@linux.vnet.ibm.com>
- *
- * This program is free software; you can redistribute it and/or modify
- * it under the terms of the GNU General Public License (version 2 only)
- * as published by the Free Software Foundation.
  */
 #define KMSG_COMPONENT	"cpum_sf"
 #define pr_fmt(fmt)	KMSG_COMPONENT ": " fmt
@@ -668,7 +665,7 @@ static void cpumsf_output_event_pid(struct perf_event *event,
 		goto out;
 
 	/* Update the process ID (see also kernel/events/core.c) */
-	data->tid_entry.pid = cpumsf_pid_type(event, pid, __PIDTYPE_TGID);
+	data->tid_entry.pid = cpumsf_pid_type(event, pid, PIDTYPE_TGID);
 	data->tid_entry.tid = cpumsf_pid_type(event, pid, PIDTYPE_PID);
 
 	perf_output_sample(&handle, &header, data, event);
@@ -756,6 +753,10 @@ static int __hw_perf_event_init(struct perf_event *event)
 	 */
 	rate = 0;
 	if (attr->freq) {
+		if (!attr->sample_freq) {
+			err = -EINVAL;
+			goto out;
+		}
 		rate = freq_to_sample_rate(&si, attr->sample_freq);
 		rate = hw_limit_rate(&si, rate);
 		attr->freq = 0;
@@ -1586,6 +1587,17 @@ static void aux_buffer_free(void *data)
 			    "%lu SDBTs\n", num_sdbt);
 }
 
+static void aux_sdb_init(unsigned long sdb)
+{
+	struct hws_trailer_entry *te;
+
+	te = (struct hws_trailer_entry *)trailer_entry_ptr(sdb);
+
+	/* Save clock base */
+	te->clock_base = 1;
+	memcpy(&te->progusage2, &tod_clock_base[1], 8);
+}
+
 /*
  * aux_buffer_setup() - Setup AUX buffer for diagnostic mode sampling
  * @cpu:	On which to allocate, -1 means current
@@ -1665,6 +1677,7 @@ static void *aux_buffer_setup(int cpu, void **pages, int nr_pages,
 		/* Tail is the entry in a SDBT */
 		*tail = (unsigned long)pages[i];
 		aux->sdb_index[i] = (unsigned long)pages[i];
+		aux_sdb_init((unsigned long)pages[i]);
 	}
 	sfb->num_sdb = nr_pages;
 
